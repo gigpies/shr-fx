@@ -80,7 +80,7 @@ quality remain unverified.
 | Need | Owning document |
 |---|---|
 | Build and run offline | [README](../README.md) |
-| Operate, route and stop | [Operating guide](OPERATING_GUIDE.md) |
+| Operate, route and stop | [Operating guide](reference/OPERATING_GUIDE.md) |
 | Complete map, setup, value ranges, menu/draft/recovery behavior | [Interaction contract](INTERFACE.md) |
 | DSP/control ownership, bounds and persistence schemas | [Architecture](ARCHITECTURE.md) |
 | Checks passed, cost evidence and remaining hardware acceptance | [Acceptance](ACCEPTANCE.md) |

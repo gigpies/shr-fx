@@ -542,7 +542,7 @@ rejection without writes, invalid-version refusal before handle access, and
 saturating clear count. Existing wet-only onset, native precision, independent
 stereo, in-place, reset and allocation-free recovery regressions pass.
 Warning-denied all-target Clippy passed. Commands (coordinated workers also
-follow the [shared build-lock policy](https://github.com/PaolaShultz/gigpies/blob/main/docs/PARALLEL_WORK_PLAN.md)):
+follow the [shared build-lock policy](https://github.com/gigpies/gigpies/blob/main/docs/development/PARALLEL_WORK_PLAN.md)):
 
 ```sh
 CARGO_INCREMENTAL=0 cargo +1.97.1 test --locked -j1 --test c_api

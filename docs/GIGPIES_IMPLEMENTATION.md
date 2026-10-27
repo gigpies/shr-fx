@@ -136,7 +136,7 @@ Next: consumer integration belongs to shared GP-FX.
   edits, interrupted transitions and recovery; use a real C caller. Unsupported
   changes must preserve the active instance and produce actionable error status.
 
-Shared integration belongs to [GP-FX](https://github.com/PaolaShultz/gigpies/blob/main/docs/MODULE_IMPLEMENTATION_PLAN.md#gp-fx--writable-owner-effects-in-the-console).
+Shared integration belongs to [GP-FX](https://github.com/gigpies/gigpies/blob/main/docs/development/MODULE_IMPLEMENTATION_PLAN.md#gp-fx--writable-owner-effects-in-the-console).
 Provide reviewed artifacts and evidence there; GigPies and Desk own their adapters.
 Neither module implementation nor this plan authorizes sibling edits or hardware use.
 
@@ -158,7 +158,7 @@ The standalone application's separate handoff remains [PLAN](PLAN.md).
 
 This is the owning plan for module-only GigPies work. Keep each new task's plan,
 implementation state, checklist, evidence and next action together here. Shared
-integration tasks live only in the [GigPies integration plan](https://github.com/PaolaShultz/gigpies/blob/main/docs/MODULE_IMPLEMENTATION_PLAN.md);
+integration tasks live only in the [GigPies integration plan](https://github.com/gigpies/gigpies/blob/main/docs/development/MODULE_IMPLEMENTATION_PLAN.md);
 link to their cards instead of copying status. Follow its task lifecycle and this
 repository's AGENTS.md. STATUS/acceptance files hold dated evidence, not another queue.
 Preserve closed milestone details in the linked archive; do not reopen old launch cards.
