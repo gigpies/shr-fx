@@ -2,7 +2,7 @@
 
 # SHR FX
 
-**A two-engine send-effects rack.** Combine reverb, delay, chorus and harmonic
+**A two-engine send-effects rack in a terminal application (TUI).** Combine reverb, delay, chorus and harmonic
 exciter in up to eight parallel slots per engine. Your mixer carries the dry
 signal; SHR FX supplies the wet returns.
 
@@ -38,3 +38,5 @@ cargo build --release --locked
 ```
 
 [Operating guide](docs/OPERATING_GUIDE.md) · [MIT license](LICENSE)
+
+[Contribute](https://github.com/gigpies/.github/blob/main/CONTRIBUTING.md) · [Report a bug](https://github.com/gigpies/shr-fx/issues/new/choose)
