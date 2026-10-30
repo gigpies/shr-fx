@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-cargo build --locked --lib -j 2
+# Caller holds /home/shome/p/.gigpies-build.lock for this complete check.
+CARGO_INCREMENTAL=0 cargo +1.97.1 build --locked --lib -j "${CARGO_BUILD_JOBS:-1}"
 fx_tmp=$(mktemp -d)
 trap 'rm -rf "$fx_tmp"' EXIT
 cc -std=c11 -Wall -Wextra -Werror -Iinclude tests/fixtures/cfx/v2/caller.c -Ltarget/debug -lshr_fx -lm -Wl,-rpath,"$PWD/target/debug" -o "$fx_tmp/caller"

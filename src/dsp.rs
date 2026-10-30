@@ -12,8 +12,10 @@ const FAULT_LIMIT: f32 = 16.0;
 const TAIL_SECONDS: f32 = 281.0;
 /// Compile-time sample precision for the shared delay primitives. The rack keeps
 /// its f32 specialization; the integration adapter uses f64 storage/arithmetic.
-trait DelaySample:
+pub(crate) trait DelaySample:
     Copy
+    + Default
+    + std::iter::Sum<Self>
     + PartialOrd
     + std::ops::Add<Output = Self>
     + std::ops::Sub<Output = Self>
@@ -27,6 +29,7 @@ trait DelaySample:
     fn from_f64(value: f64) -> Self;
     fn as_usize(self) -> usize;
     fn abs(self) -> Self;
+    fn exp(self) -> Self;
     fn round(self) -> Self;
     fn fract(self) -> Self;
     fn min(self, other: Self) -> Self;
@@ -43,6 +46,9 @@ macro_rules! delay_sample {
             }
             fn as_usize(self) -> usize {
                 self as usize
+            }
+            fn exp(self) -> Self {
+                <$sample>::exp(self)
             }
             fn abs(self) -> Self {
                 <$sample>::abs(self)
@@ -1220,17 +1226,40 @@ pub(crate) enum EmbeddedEffect {
     Delay(Delay<f64>),
     Room(Room<f64>),
     Chorus(Chorus<f64>),
+    Exciter(crate::exciter::Exciter<f64>),
 }
 impl EmbeddedEffect {
+    fn exciter_parameters(s: &crate::c_api_v2::Settings) -> crate::exciter::Parameters<f64> {
+        crate::exciter::Parameters {
+            tune_hz: s.rate_hz,
+            drive: s.amount,
+            tone: s.damping,
+            bright: s.algorithm == 10,
+        }
+    }
     pub(crate) fn new(rate: u32, s: &crate::c_api_v2::Settings) -> Self {
         let rate = rate as f64;
         match s.algorithm {
-            1 => Self::Delay(Delay::new(
+            1 | 8 => Self::Delay(Delay::new(
                 rate,
                 (s.time_ms * rate / 1000.0).round() * 1000.0 / rate,
                 s.seed as f64 / 4294967296.0,
             )),
-            2 => Self::Room(Room::new(rate, s.time_ms, ReverbKind::Room)),
+            2 | 4..=7 => Self::Room(Room::new(
+                rate,
+                s.time_ms,
+                match s.algorithm {
+                    4 => ReverbKind::SmallRoom,
+                    5 => ReverbKind::Chamber,
+                    6 => ReverbKind::Plate,
+                    7 => ReverbKind::Hall,
+                    _ => ReverbKind::Room,
+                },
+            )),
+            9 | 10 => Self::Exciter(crate::exciter::Exciter::new(
+                rate,
+                Self::exciter_parameters(s),
+            )),
             _ => Self::Chorus(Chorus::new(rate, s.seed as f64 / 4294967296.0)),
         }
     }
@@ -1251,6 +1280,7 @@ impl EmbeddedEffect {
                     || x.input_diffusers.iter().flatten().any(|a| overlap(&a.ring))
             }
             Self::Chorus(x) => x.rings.iter().any(overlap),
+            Self::Exciter(_) => false, // All filter storage is inline in Prepared.
         }
     }
     pub(crate) fn clear(&mut self) {
@@ -1258,6 +1288,7 @@ impl EmbeddedEffect {
             Self::Delay(x) => x.clear(),
             Self::Room(x) => x.clear(),
             Self::Chorus(x) => x.clear(),
+            Self::Exciter(x) => x.clear(),
         }
     }
     pub(crate) fn tick(
@@ -1273,7 +1304,11 @@ impl EmbeddedEffect {
                 input,
                 (s.time_ms * rate / 1000.0).round(),
                 DelayParameters {
-                    kind: DelayKind::Digital,
+                    kind: if s.algorithm == 8 {
+                        DelayKind::Tape
+                    } else {
+                        DelayKind::Digital
+                    },
                     feedback: s.amount,
                     damping: s.damping,
                     ping_pong: false,
@@ -1282,6 +1317,7 @@ impl EmbeddedEffect {
                 false,
             ),
             Self::Room(x) => x.tick(input, s.time_ms * rate / 1000.0, s.amount, s.damping),
+            Self::Exciter(x) => x.tick(input, Self::exciter_parameters(s)),
             Self::Chorus(x) => x.tick(
                 input,
                 ChorusParameters {

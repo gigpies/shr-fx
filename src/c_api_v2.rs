@@ -92,6 +92,57 @@ fn shape<T>(p: *const T) -> bool {
 fn output<T>(p: *mut T, v: u32, n: u32) -> bool {
     v == 2 && n as usize == size_of::<T>() && shape(p)
 }
+pub const DELAY: u32 = 1;
+pub const ROOM: u32 = 2;
+pub const CHORUS: u32 = 3;
+pub const SMALL_ROOM: u32 = 4;
+pub const CHAMBER: u32 = 5;
+pub const PLATE: u32 = 6;
+pub const HALL: u32 = 7;
+pub const TAPE: u32 = 8;
+pub const EXCITER_WARM: u32 = 9;
+pub const EXCITER_BRIGHT: u32 = 10;
+pub const ALGORITHM_MASK: u32 = (1 << 11) - 2;
+
+// One source of truth for validation, defaults and descriptors.
+// (available, unit, minimum, maximum, default)
+fn parameter_spec(a: u32, id: u32) -> Option<(u32, u32, f64, f64, f64)> {
+    if !(DELAY..=EXCITER_BRIGHT).contains(&a) || !(1..=6).contains(&id) {
+        return None;
+    }
+    let exciter = matches!(a, EXCITER_WARM | EXCITER_BRIGHT);
+    Some(match id {
+        1 => match a {
+            DELAY | TAPE => (1, 1, 1.0, 2000.0, if a == TAPE { 375.0 } else { 20.0 }),
+            CHORUS => (1, 1, 1.0, 30.0, 12.0),
+            EXCITER_WARM | EXCITER_BRIGHT => (0, 1, 0.0, 0.0, 0.0),
+            _ => (1, 1, 0.0, 200.0, 0.0),
+        },
+        2 => match a {
+            DELAY | TAPE => (1, 0, 0.0, 0.9, if a == TAPE { 0.45 } else { 0.25 }),
+            CHORUS => (1, 1, 0.0, 9.0, 3.0),
+            EXCITER_WARM | EXCITER_BRIGHT => (1, 0, 0.0, 1.0, 0.3),
+            _ => (1, 0, 0.0, 0.9, 0.5),
+        },
+        3 => match a {
+            CHORUS => (0, 0, 0.0, 0.0, 0.0),
+            TAPE => (1, 0, 0.35, 1.0, 0.5),
+            EXCITER_WARM | EXCITER_BRIGHT => (1, 0, 0.0, 1.0, 0.6),
+            _ => (1, 0, 0.0, 1.0, 0.35),
+        },
+        4 => {
+            if a == CHORUS {
+                (1, 2, 0.05, 10.0, 0.5)
+            } else if exciter {
+                (1, 2, 600.0, 6000.0, 2500.0)
+            } else {
+                (0, 2, 0.0, 0.0, 0.0)
+            }
+        }
+        5 => (1, 0, 0.0, 1.0, 0.5),
+        _ => (1, 3, 0.0, 1.0, 0.0),
+    })
+}
 fn valid(s: &Settings) -> bool {
     s.version == 2
         && s.size as usize == size_of::<Settings>()
@@ -99,31 +150,12 @@ fn valid(s: &Settings) -> bool {
         && s.reserved == 0
         && [s.time_ms, s.amount, s.damping, s.rate_hz, s.gain]
             .iter()
-            .all(|x| x.is_finite())
-        && (0.0..=1.0).contains(&s.gain)
-        && match s.algorithm {
-            1 => {
-                (1.0..=2000.0).contains(&s.time_ms)
-                    && (0.0..=0.9).contains(&s.amount)
-                    && (0.0..=1.0).contains(&s.damping)
-                    && s.rate_hz == 0.0
-            }
-            2 => {
-                (0.0..=200.0).contains(&s.time_ms)
-                    && (0.0..=0.9).contains(&s.amount)
-                    && (0.0..=1.0).contains(&s.damping)
-                    && s.rate_hz == 0.0
-            }
-            3 => {
-                (1.0..=30.0).contains(&s.time_ms)
-                    && (0.0..=9.0).contains(&s.amount)
-                    && s.time_ms - s.amount >= 1.0
-                    && s.time_ms + s.amount <= 39.0
-                    && s.damping == 0.0
-                    && (0.05..=10.0).contains(&s.rate_hz)
-            }
-            _ => false,
-        }
+            .enumerate()
+            .all(|(i, x)| {
+                parameter_spec(s.algorithm, i as u32 + 1)
+                    .is_some_and(|(_, _, min, max, _)| x.is_finite() && (min..=max).contains(x))
+            })
+        && (s.algorithm != CHORUS || (s.time_ms - s.amount >= 1.0 && s.time_ms + s.amount <= 39.0))
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn shr_fx_v2_validate(s: *const Settings) -> i32 {
@@ -140,12 +172,12 @@ pub unsafe extern "C" fn shr_fx_v2_defaults(a: u32, out: *mut Settings, v: u32, 
         if !output(out, v, n) {
             return -1;
         }
-        let (time_ms, amount, damping, rate_hz) = match a {
-            1 => (20.0, 0.25, 0.35, 0.0),
-            2 => (0.0, 0.5, 0.35, 0.0),
-            3 => (12.0, 3.0, 0.0, 0.5),
-            _ => return -6,
+        let Some((_, _, _, _, time_ms)) = parameter_spec(a, 1) else {
+            return -6;
         };
+        let amount = parameter_spec(a, 2).unwrap().4;
+        let damping = parameter_spec(a, 3).unwrap().4;
+        let rate_hz = parameter_spec(a, 4).unwrap().4;
         unsafe {
             out.write(Settings {
                 version: 2,
@@ -174,7 +206,7 @@ pub unsafe extern "C" fn shr_fx_v2_capabilities(out: *mut Capabilities, v: u32, 
             out.write(Capabilities {
                 version: 2,
                 size: n,
-                algorithm_mask: 14,
+                algorithm_mask: ALGORITHM_MASK,
                 sample_bits: 64,
                 min_rate: 8000,
                 max_rate: 192000,
@@ -497,36 +529,8 @@ pub unsafe extern "C" fn shr_fx_v2_parameter(
         if !output(out, v, n) {
             return -1;
         }
-        if !(1..=3).contains(&a) || !(1..=6).contains(&id) {
+        let Some((available, unit, minimum, maximum, default_value)) = parameter_spec(a, id) else {
             return -6;
-        }
-        let (available, unit, minimum, maximum, default_value) = match id {
-            1 => match a {
-                1 => (1, 1, 1.0, 2000.0, 20.0),
-                2 => (1, 1, 0.0, 200.0, 0.0),
-                _ => (1, 1, 1.0, 30.0, 12.0),
-            },
-            2 => match a {
-                1 => (1, 0, 0.0, 0.9, 0.25),
-                2 => (1, 0, 0.0, 0.9, 0.5),
-                _ => (1, 1, 0.0, 9.0, 3.0),
-            },
-            3 => {
-                if a == 3 {
-                    (0, 0, 0.0, 0.0, 0.0)
-                } else {
-                    (1, 0, 0.0, 1.0, 0.35)
-                }
-            }
-            4 => {
-                if a == 3 {
-                    (1, 2, 0.05, 10.0, 0.5)
-                } else {
-                    (0, 2, 0.0, 0.0, 0.0)
-                }
-            }
-            5 => (1, 0, 0.0, 1.0, 0.5),
-            _ => (1, 3, 0.0, 1.0, 0.0),
         };
         unsafe {
             out.write(Parameter {
@@ -541,6 +545,43 @@ pub unsafe extern "C" fn shr_fx_v2_parameter(
                 default_value,
             })
         };
+        0
+    })
+}
+
+/// Optional control-side musical-time conversion; no clock or state ownership.
+/// denominator 1/2/4/8/16/32/64, modifier 0 straight, 1 dotted, 2 triplet.
+/// Out-of-capacity times are refused, never silently clamped.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn shr_fx_v2_delay_time(
+    bpm: f64,
+    denominator: u32,
+    modifier: u32,
+    out_ms: *mut f64,
+) -> i32 {
+    guarded(|| {
+        if !shape(out_ms) {
+            return -1;
+        }
+        if !bpm.is_finite()
+            || !(30.0..=300.0).contains(&bpm)
+            || !matches!(denominator, 1 | 2 | 4 | 8 | 16 | 32 | 64)
+            || modifier > 2
+        {
+            return -6;
+        }
+        let factor = match modifier {
+            1 => 1.5,
+            2 => 2.0 / 3.0,
+            _ => 1.0,
+        };
+        let ms = 240_000.0 / bpm / denominator as f64 * factor;
+        if !(1.0..=2000.0).contains(&ms) {
+            return -2;
+        }
+        unsafe {
+            out_ms.write(ms);
+        }
         0
     })
 }

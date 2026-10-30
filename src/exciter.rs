@@ -1,9 +1,9 @@
 //! Original aux harmonic generator: filtered nonlinear residual, no dry sum.
 //! Two cascaded 2x polyphase half-band stages surround the nonlinearity (4x).
 //! FIRs are 17-tap Hamming-windowed sinc, normalized to unity DC gain.
-use crate::model::ExciterConfig;
+use crate::{dsp::DelaySample, model::ExciterConfig};
 
-const ODD: [f32; 8] = [
+const ODD: [f64; 8] = [
     -0.005248316,
     0.023251573,
     -0.07623855,
@@ -14,81 +14,100 @@ const ODD: [f32; 8] = [
     -0.005248316,
 ];
 
+#[derive(Clone, Copy)]
+pub(crate) struct Parameters<S: DelaySample> {
+    pub tune_hz: S,
+    pub drive: S,
+    pub tone: S,
+    pub bright: bool,
+}
+impl From<ExciterConfig> for Parameters<f32> {
+    fn from(c: ExciterConfig) -> Self {
+        Self {
+            tune_hz: c.tune_hz,
+            drive: c.drive,
+            tone: c.tone,
+            bright: c.bright,
+        }
+    }
+}
+
 #[derive(Default)]
-struct Up {
-    history: [f32; 8],
+struct Up<S: DelaySample = f32> {
+    history: [S; 8],
     pos: usize,
 }
-impl Up {
-    fn tick(&mut self, input: f32) -> [f32; 2] {
+impl<S: DelaySample> Up<S> {
+    fn tick(&mut self, input: S) -> [S; 2] {
         self.history[self.pos] = input;
         let even = self.history[(self.pos + 4) & 7];
         let odd = ODD
             .iter()
             .enumerate()
-            .map(|(i, c)| c * self.history[(self.pos + 8 - i) & 7])
-            .sum::<f32>()
-            * 2.0;
+            .map(|(i, c)| S::from_f64(*c) * self.history[(self.pos + 8 - i) & 7])
+            .sum::<S>()
+            * S::from_f64(2.0);
         self.pos = (self.pos + 1) & 7;
         [even, odd]
     }
 }
 #[derive(Default)]
-struct Down {
-    even: [f32; 8],
-    odd: [f32; 8],
+struct Down<S: DelaySample = f32> {
+    even: [S; 8],
+    odd: [S; 8],
     pos: usize,
 }
-impl Down {
-    fn tick(&mut self, input: [f32; 2]) -> f32 {
+impl<S: DelaySample> Down<S> {
+    fn tick(&mut self, input: [S; 2]) -> S {
         self.even[self.pos] = input[0];
         self.odd[self.pos] = input[1];
-        let out = self.odd[(self.pos + 4) & 7] * 0.5
+        let out = self.odd[(self.pos + 4) & 7] * S::from_f64(0.5)
             + ODD
                 .iter()
                 .enumerate()
-                .map(|(i, c)| c * self.even[(self.pos + 8 - i) & 7])
-                .sum::<f32>();
+                .map(|(i, c)| S::from_f64(*c) * self.even[(self.pos + 8 - i) & 7])
+                .sum::<S>();
         self.pos = (self.pos + 1) & 7;
         out
     }
 }
 #[derive(Default)]
-struct Channel {
-    up: [Up; 2],
-    down: [Down; 2],
-    input_low: [f32; 2],
-    output_low: [f32; 2],
-    dc: f32,
+struct Channel<S: DelaySample = f32> {
+    up: [Up<S>; 2],
+    down: [Down<S>; 2],
+    input_low: [S; 2],
+    output_low: [S; 2],
+    dc: S,
 }
-fn lowpass(state: &mut f32, input: f32, coefficient: f32) -> f32 {
+fn lowpass<S: DelaySample>(state: &mut S, input: S, coefficient: S) -> S {
     *state += coefficient * (input - *state);
-    if state.abs() < 1e-20 {
-        *state = 0.0;
+    if state.abs() < S::from_f64(1e-20) {
+        *state = S::from_f64(0.0);
     }
     *state
 }
-fn residual(input: f32, gain: f32, bright: bool) -> f32 {
+fn residual<S: DelaySample>(input: S, gain: S, bright: bool) -> S {
     let x = input * gain;
     let square = x * x;
-    let bend = square / (1.0 + square);
+    let bend = square / (S::from_f64(1.0) + square);
     // No linear term. Warm adds even harmonics with some odd colour; Bright
     // emphasizes odd harmonics. This is a residual, not a full distorted copy.
     if bright {
-        bend * (0.1 - 0.7 * x) / gain
+        bend * (S::from_f64(0.1) - S::from_f64(0.7) * x) / gain
     } else {
-        bend * (0.8 - 0.15 * x) / gain
+        bend * (S::from_f64(0.8) - S::from_f64(0.15) * x) / gain
     }
 }
-pub(crate) struct Exciter {
-    channels: [Channel; 2],
-    rate: f32,
-    coefficient: [f32; 3],
-    target: [f32; 3],
+pub(crate) struct Exciter<S: DelaySample = f32> {
+    channels: [Channel<S>; 2],
+    rate: S,
+    coefficient: [S; 3],
+    target: [S; 3],
     control_phase: u8,
 }
-impl Exciter {
-    pub(crate) fn new(rate: f32, config: ExciterConfig) -> Self {
+impl<S: DelaySample> Exciter<S> {
+    pub(crate) fn new(rate: S, config: impl Into<Parameters<S>>) -> Self {
+        let config = config.into();
         let coefficient = Self::coefficients(rate, config);
         Self {
             channels: std::array::from_fn(|_| Channel::default()),
@@ -98,19 +117,22 @@ impl Exciter {
             control_phase: 0,
         }
     }
-    fn coefficients(rate: f32, config: ExciterConfig) -> [f32; 3] {
+    fn coefficients(rate: S, config: Parameters<S>) -> [S; 3] {
         [
-            config.tune_hz.min(rate * 0.2),
-            (2000.0 + config.tone * 16000.0).min(rate * 0.4),
-            20.0,
+            config.tune_hz.min(rate * S::from_f64(0.2)),
+            (S::from_f64(2000.0) + config.tone * S::from_f64(16000.0)).min(rate * S::from_f64(0.4)),
+            S::from_f64(20.0),
         ]
-        .map(|hz| 1.0 - (-std::f32::consts::TAU * hz / rate).exp())
+        .map(|hz| {
+            S::from_f64(1.0) - ((S::ZERO - S::from_f64(std::f64::consts::TAU)) * hz / rate).exp()
+        })
     }
     pub(crate) fn clear(&mut self) {
         self.channels = std::array::from_fn(|_| Channel::default());
         self.control_phase = 0;
     }
-    pub(crate) fn tick(&mut self, input: [f32; 2], config: ExciterConfig) -> [f32; 2] {
+    pub(crate) fn tick(&mut self, input: [S; 2], config: impl Into<Parameters<S>>) -> [S; 2] {
+        let config = config.into();
         // Expensive coefficient preparation is bounded to once per 32 samples;
         // interpolation plus the owning slot's parameter slew prevents steps.
         if self.control_phase == 0 {
@@ -118,9 +140,9 @@ impl Exciter {
         }
         self.control_phase = (self.control_phase + 1) & 31;
         for (c, target) in self.coefficient.iter_mut().zip(self.target) {
-            *c += (target - *c) / 32.0;
+            *c += (target - *c) / S::from_f64(32.0);
         }
-        let gain = 1.0 + config.drive * 15.0;
+        let gain = S::from_f64(1.0) + config.drive * S::from_f64(15.0);
         std::array::from_fn(|c| {
             let channel = &mut self.channels[c];
             let mut band = input[c];
@@ -147,6 +169,36 @@ impl Exciter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_f64_oversampling_reduces_folded_harmonics() {
+        let mut up: [Up<f64>; 2] = std::array::from_fn(|_| Up::default());
+        let mut down: [Down<f64>; 2] = std::array::from_fn(|_| Down::default());
+        let mut direct = Vec::new();
+        let mut filtered = Vec::new();
+        for n in 0..8192 {
+            let x = (std::f64::consts::TAU * 853.0 * n as f64 / 4096.0).sin() * 0.7;
+            let at_two = up[0]
+                .tick(x)
+                .map(|s| down[1].tick(up[1].tick(s).map(|v| residual(v, 5.0, true))));
+            let y = down[0].tick(at_two);
+            if n >= 4096 {
+                direct.push(residual(x, 5.0, true));
+                filtered.push(y);
+            }
+        }
+        let bin = |samples: &[f64], k: usize| {
+            let (mut re, mut im) = (0.0, 0.0);
+            for (n, x) in samples.iter().enumerate() {
+                let phase = std::f64::consts::TAU * (k * n) as f64 / samples.len() as f64;
+                re += x * phase.cos();
+                im += x * phase.sin();
+            }
+            re.hypot(im)
+        };
+        for alias in [1537, 169] {
+            assert!(bin(&filtered, alias) < bin(&direct, alias) * 0.15);
+        }
+    }
     fn bin(samples: &[f32], k: usize) -> f32 {
         let (mut re, mut im) = (0.0, 0.0);
         for (n, x) in samples.iter().enumerate() {

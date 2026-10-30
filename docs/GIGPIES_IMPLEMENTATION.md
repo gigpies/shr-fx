@@ -18,11 +18,28 @@ embedding. [Header](../include/shr_fx.h) and [architecture](ARCHITECTURE.md) are
 
 State: IMPLEMENTED (offline); target acceptance pending. Owner: SHR FX. Outcome: a small versioned f64 wet-effects
 interface that GigPies can prepare, control and render without owning FX DSP.
-Progress/evidence: offline implementation delivered; native f64 writable Delay,
-Room and chorus, prepared ownership and status artifacts. See the 2026-10-09
-entry in [Acceptance](ACCEPTANCE.md) and the v2 Architecture/header contract.
+Progress/evidence: native f64 prepared embedding delivered; the owner-authorized
+2026-10-29 expansion adds Small Room, Chamber, Plate, Hall, tape echo and
+Warm/Bright exciter to Digital Delay, Room and chorus. Musical-time conversion
+adds straight/dotted/triplet notes from whole through 1/64 within the explicit
+2-second delay capacity. See [Acceptance](ACCEPTANCE.md) and the v2 contract.
 Next: separately authorized target-specific aggregate budget and live acceptance;
 GigPies/Desk consumer adapters remain owned by those projects.
+
+2026-10-29 initial provider audit (before the subsequently authorized palette
+expansion): implementation verified against actual native f64 DSP,
+versioned header and synthetic Rust/C wet-output checks; no DSP or ABI-layout
+change required. [Consumer requirements](ARCHITECTURE.md#gp-fx-consumer-requirements)
+clarify units, immediate bypass, replacement fades, retry and serialized retirement.
+[Dated evidence and exact artifact identity](ACCEPTANCE.md#2026-10-29--gp-fx-provider-readiness)
+supersede neither historical hardware limits nor the separate aggregate budget gate.
+Host/Desk wiring was explicitly deferred during the provider audit because REC
+owned GigPies and SHR Desk; both were read-only in that parallel phase. The owner
+subsequently released them and authorized GP-FX integration: four ordinary stereo
+FX aux buses with independent wet returns, not the standalone A/B slot rack.
+Current consumer work is owned by the existing shared GP-FX card: four stereo
+aux sends travel to Brain's four palette instances and return wet to Main;
+monitor buses remain independent. The explicit local-host variant is retained.
 
 ### Scope and reuse
 
@@ -35,8 +52,8 @@ delay; standalone features are not evidence that writable embedding exists.
 2. Extend shared primitives to f64 where required for one existing room/chamber
    reverb and the existing chorus. Preserve standalone f32 regressions and
    independently verify the new precision path; casting f32 output is insufficient.
-3. Admit further existing variants only after their units, wet behavior and
-   resource costs meet the same contract. One accepted effect can be integrated
+3. Reuse existing reverb/tape variants and specialize the shared exciter to f64,
+   with explicit units, wet semantics and bounded memory/work. One accepted effect can be integrated
    without waiting for the whole palette or standalone rack exposure.
 
 Start with one effect per independently owned instance. Keep instance limits
@@ -119,7 +136,35 @@ State: IMPLEMENTED (offline); reviewed FX-02 contract delivered. Owner: SHR FX.
 Outcome: versioned capabilities, parameter descriptors, validated edits and
 correlated current/target/fault readback. Progress/evidence: real C caller and
 normal recovery/output tests; v1 retained separately (see Acceptance).
-Next: consumer integration belongs to shared GP-FX.
+Consumer integration and its software acceptance belong to shared GP-FX.
+
+The subsequent owner-authorized palette expansion retains this lifecycle and
+adds capability bits/descriptors for the new effects plus an optional musical-time
+helper. Actual wet-output and lifecycle checks cover all advertised IDs; see
+[final expansion evidence](ACCEPTANCE.md#2026-10-29--authorized-embedded-palette-expansion).
+No provider blocker remains for these effects' offline consumer integration.
+Target aggregate admission remains separate. GP-FX uses four ordinary stereo auxes;
+the standalone A/B slot rack is not the requested mixer interface.
+
+2026-10-29 audit: capabilities/descriptors and accepted/current/applied/refused
+readback verified with actual C wet output, including changed gain, stale-history
+preservation and excitation-off tails. No provider blocker remains for bounded
+offline GP-FX integration. Consumer work was deferred under REC's sibling ownership;
+the subsequent ownership release moves integration to the existing shared GP-FX card.
+
+GP-FX consumer contract order (the existing shared card owns implementation and evidence):
+1. Bind the complete palette symbol set and version/size layouts independently
+   of the existing fixed-v1 and GP21 delay-v2 adapters; retain their fallback.
+2. Define host instance/send/return admission and source epoch/rate ownership;
+   bound preparations and retired-token queues, with off-thread destruction.
+3. Publish validated copied settings at source block boundaries with request/base
+   correlation; distinguish acceptance, swap, fade completion and interruption.
+   Reclaim tokens before another edit; preserve failure ownership and backpressure.
+4. Expose only advertised units/joint bounds in Desk; keep target/current/fault
+   visible. Host owns persistent mute/rearm, reset on discontinuity and shutdown.
+5. Test actual provider wet samples through host/Desk edits, stale/refused edits,
+   fallback, reconnect, tails, reset and quiesced teardown before separate target
+   aggregate performance and live/listening acceptance.
 
 - [x] Advertise only supported algorithms/parameters, units/ranges, precision,
   rate/block/instance limits and transition resources. Distinguish unavailable
@@ -140,19 +185,27 @@ Shared integration belongs to [GP-FX](https://github.com/gigpies/gigpies/blob/ma
 Provide reviewed artifacts and evidence there; GigPies and Desk own their adapters.
 Neither module implementation nor this plan authorizes sibling edits or hardware use.
 
-## Retained ideas for later selection
+## Palette scope and later consumer exposure
 
-Existing tape-delay character, richer modulation and harmonic colour are useful
-palette candidates. Start from the existing delay/exciter implementations; select
-an addition only for a demonstrated musical need and measured cost. Saturation
-needs wet-return semantics, DC/aliasing/headroom checks and external dry-plus-wet
-listening. Use character names unless a specific hardware model is substantiated.
-A small set of validated example settings can support review and repeatability.
+The owner selected reverb variety, tape echo and exciter after the initial
+provider-only readiness audit. They use the same prepared lifecycle, with new
+algorithm IDs and no changes to the original settings/status layouts. Dark and
+bright reverb variation uses damping, not an extra algorithm bank. Native f64
+exciter shares the standalone oversampled residual implementation. A pure helper
+converts host BPM and note divisions; unsupported long times refuse explicitly.
+Full standalone A/B/eight-slot composition is still not exposed by this
+single-instance ABI. GigPies/Desk now map this palette into four stereo auxes
+through Brain, with bounded instance admission and no copied DSP; the shared
+GP-FX card owns the actual transport and Desk evidence. Existing
+standalone MultiTap/Diffused delay, ping-pong and ensemble options remain separate
+from this bounded palette increment; exposing every rack option will require
+additional owner descriptors and tests, not merely relabelled Desk controls.
 
-These are candidates, not prerequisites or a second task queue. There is no
-scheduled saturation catalogue, arbitrary EQ/clean-boost insert rack, randomizer,
-new preset browser or series-chain UI. Select later work in an owning task card.
-The standalone application's separate handoff remains [PLAN](PLAN.md).
+Host/Desk wiring was deferred while REC owned those repositories; the subsequent
+release authorizes the four-aux consumer integration in the shared GP-FX card. No further
+palette or arbitrary series-chain UI is authorized by this implementation.
+Target performance, dry-plus-wet listening and phase assessment (especially
+exciter) are separate gates; Hall availability is not a live admission claim.
 
 ## Tracking and verification
 

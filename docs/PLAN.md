@@ -112,10 +112,14 @@ contract identities are retained with the [v2 owner corpus](../tests/fixtures/cf
 Shared integration work is linked to its GigPies owner; dated evidence above
 retains its original scope.
 
-Next owner/action: GigPies independently reviews this owner package and implements
-source-indexed return composition and old-library fallback; Desk consumes that
-provider for explicit controls. No standalone UI/schema change or complete A/B
-rack embedding is part of this increment. Further palettes/rack widening need a
-separate complete owner task and measured resource admission. Physical listening,
+Current provider handoff: FX-02/03 owns the prepared palette expansion to reverb
+variants, tape echo and Warm/Bright exciter, plus host-BPM musical-time conversion. Its contract and later GP-FX
+wiring requirements live in the [owning cards](GIGPIES_IMPLEMENTATION.md).
+Existing source-timeline delay integration remains separate and compatible.
+Host/Desk wiring was deferred during REC ownership. The owner subsequently released
+GigPies/Desk and selected four ordinary stereo FX auxes; their shared GP-FX card
+owns that consumer integration. No provider
+implementation blocker was found. No standalone UI/schema change or complete A/B
+rack embedding is part of this increment. Physical listening,
 JACK scheduling, latency and controller acceptance still require the separately
 authorized session described in Acceptance.

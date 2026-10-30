@@ -613,6 +613,140 @@ Historical exhaustive cost/audition/soak matrices, physical I/O, network/load,
 recording, display takeover, services and publication/deployment are outside
 this software acceptance. No listening, JACK deadline, physical path latency,
 thermal headroom or complete embedded rack acceptance is implied.
+## 2026-10-29 — authorized embedded palette expansion
+
+After the initial readiness audit, the owner requested the missing musical
+palette in SHR FX, leaving GigPies/Desk interface work for their later free
+session. Implemented additive IDs 4–10: Small Room, Chamber, Plate, Hall, tape
+echo, Warm exciter and Bright exciter. Reverb damping provides dark/bright
+variation. Existing generic delay/reverb networks are reused; the existing
+4x oversampled exciter is now shared through native f32/f64 specialization.
+No separate rack, DSP copy, sibling dependency or physical endpoint was added.
+
+Capabilities now advertise mask 2046. Original IDs 1–3, C struct layouts and
+both fixed-v1 and independent timeline-delay ABIs remain compatible. The optional
+`shr_fx_v2_delay_time` helper converts host BPM and whole through 1/64 notes,
+straight/dotted/triplet, to milliseconds. Values beyond the existing 2-second
+capacity are explicitly refused, not clamped. Host retains clock/tempo ownership.
+[Architecture](ARCHITECTURE.md#gp-fx-consumer-requirements) and
+[header](../include/shr_fx.h) specify parameter units, sample-rate filter caps,
+wet tails, transitions and ownership. Full A/B/eight-slot composition and remaining
+standalone delay/ensemble options are separate from this palette increment.
+
+Final verification: **136 normal tests passed, 2 opt-in tests ignored**.
+Focused library/palette/realtime checks passed before the full suite. All three
+real C callers passed against the freshly built debug library, including every
+new effect's changed wet output, stale/refused edits, bypass tails, reset/fault
+recovery and pending teardown. Independent Rust expectations cover shortest-comb
+onset/amplitude and stereo diffusion for each reverb, high-frequency tail
+reduction with damping, tape saturation plus fractional wow/flutter taps,
+musical-time conversion and rendered onset, warm/bright harmonic content,
+nonlinear small-signal scaling (no linear dry leak), zero-drive silence and
+f64 oversampling alias suppression. Reset/partition tests cover all new IDs at
+8/48/192 kHz. Allocation instrumentation covers all ten algorithms at maximum
+rate through preparation, publication, transition, reset and retirement within
+the existing memory ceiling. Existing standalone f32, UI, routing, persistence,
+controller, v1 and timeline-delay tests pass unchanged.
+
+One new independent reverb amplitude expectation initially omitted the existing
+Plate/Hall .65 output headroom factor and used an incorrect Hall feedback value;
+the expectation was corrected to the documented network before the final pass.
+Warning-denied all-target Clippy, formatting, changed Markdown local links and
+`git diff --check` pass. No renderer changes, so no gallery regeneration needed.
+
+Builds were serialized under the existing nonblocking shared lock; while REC
+held it, only independent source/contract work continued. Reproduce with
+`flock -xn /home/shome/p/.gigpies-build.lock env CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=1`
+prefixing each command:
+
+```sh
+cargo +1.97.1 test --locked -j1 --lib --test c_api_v2 --test realtime
+scripts/check_c_api_v2.sh
+cargo +1.97.1 test --locked -j1 --all-targets
+cargo +1.97.1 clippy --locked -j1 --all-targets -- -D warnings
+cargo +1.97.1 fmt --check
+```
+
+Exact final offline artifact: package 0.3.1, Rust 1.97.1, source base
+`703be52ed3fffde053760ae0f6ac4378b46989df` plus the uncommitted changes described
+here. These identities supersede the initial audit artifacts below:
+
+| Artifact | SHA-256 |
+|---|---|
+| `include/shr_fx.h` | `e3fb2b267d5d7632ea3d7c5fdc722b9ffeb8e2cad772b04a696db807df21823f` |
+| `target/debug/libshr_fx.so` | `ef18cec931a1483fdab49ffc136ada5424de696d3807ecd9352cc69e190fc89a` |
+| unchanged `Cargo.lock` | `804697456769061467fcaaf60e823cf801b581a39bcfa76c8eee5d02ecf2d3a5` |
+
+No hardware/load benchmarks, historical auditions, live/listening tests, service
+changes, publication, commits or pushes. Aggregate target budget remains
+unavailable; exposing Hall does not qualify it for live admission. GigPies/Desk
+wiring is deferred under REC's ownership and those repositories were untouched.
+Temporary C executables were removed by the existing runner; no scratch files,
+logs or generated media were retained. Normal reusable target output is about
+1004 MiB, including the 20,593,000-byte debug shared library. No extra cleanup
+was required (0 additional bytes reclaimed); pre-build free space was 51 GiB.
+
+## 2026-10-29 — GP-FX provider readiness
+
+This records the initial audit, before the owner-authorized expansion above.
+
+FX-02/03 were verified as implemented, not reimplemented. The palette's native
+f64 Delay/Room/Chorus DSP, complete versioned API and lifecycle are sufficient
+for bounded offline GP-FX integration. No provider implementation blocker was
+found; no DSP, signatures, layouts or standalone behavior changed. Header and
+Architecture now clarify parameter meanings, retry watermark, immediate bypass,
+replacement fades, serialized retirement and reset/panic/shutdown obligations.
+Host/Desk wiring is deferred because REC owns GigPies and SHR Desk during this
+parallel phase. Siblings were inspected read-only; no patches were made there.
+
+Source base: `703be52ed3fffde053760ae0f6ac4378b46989df` plus the uncommitted
+contract/C-test changes recorded here. Package `shr-fx` 0.3.1, Rust
+`1.97.1 (8bab26f4f 2026-07-14)`, native aarch64 Linux debug shared library:
+
+| Artifact | SHA-256 |
+|---|---|
+| `include/shr_fx.h` | `13fbfde5ca9a82a44a269bd60395169c24b4f6c0f5b7f5254a50e31f8e6979dd` |
+| `target/debug/libshr_fx.so` | `067a8a8d68b880f4a4f0a77eb68d4c21b11564b2b0fc5e51ec0ff62ca060c729` |
+| `Cargo.lock` (unchanged) | `804697456769061467fcaaf60e823cf801b581a39bcfa76c8eee5d02ecf2d3a5` |
+
+`nm -D --defined-only` verified all 13 palette `shr_fx_v2_*`, 10 independent
+`shr_fx_delay_v2_*` and 7 fixed `shr_fx_v1_*` exports. C layout assertions cover
+palette settings/capabilities/parameter/status sizes 64/48/48/200 and current
+offset 72. Historical corpus hashes identify historical builds, not this artifact.
+
+All build/test commands held `/home/shome/p/.gigpies-build.lock` via `flock -xn`,
+with `CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=1`, committed lockfile, Rust 1.97.1
+and canonical target directory. Commands after that prefix:
+
+```sh
+cargo +1.97.1 test --locked -j1 --test c_api_v2 --test c_api --test c_api_delay_v2
+scripts/check_c_api_v2.sh
+cargo +1.97.1 test --locked -j1 --all-targets
+cargo +1.97.1 fmt --check
+```
+
+Focused ABI tests: **28 passed**. Complete normal suite: **129 passed,
+2 intentionally ignored** (aggregate embedding cost matrix and standalone soak).
+All three actual C callers passed with C11 warnings denied against the newly
+built library. Expanded palette caller compares changed wet output to a fresh
+reference, checks stale edits preserve history and refusal readback, and checks
+bypass rejects new excitation while preserving an audible tail for every effect.
+Existing checks cover sub-f32 sample detail, independent onsets/feedback, seeded
+modulation, bounds/fault isolation, reset, interrupted edits, token ownership,
+backpressure and pending destruction. Normal allocation instrumentation verifies
+publication/process/transitions/reset/retirement do not allocate or free.
+Local links in changed Markdown, formatting and `git diff --check` pass.
+
+No physical audio/MIDI/DMX, service changes, load benchmarks, publication, commits
+or pushes. Historical auditions/cost matrices and live/listening/aggregate target
+acceptance were intentionally not run; hardware budget remains unavailable.
+No release artifact was built or qualified. Temporary C executables were removed
+by the existing runner's exit trap; no scratch runner/log/render was retained.
+Normal reusable target output is about 990 MiB, including the 20,457,520-byte
+verified shared library; no extra cache cleanup was needed (0 additional bytes
+reclaimed). Free space before builds was 56 GiB. Consumer wiring order remains
+in the existing [FX-03 card](GIGPIES_IMPLEMENTATION.md#fx-03--owner-controlstatus-artifacts).
+
 ## 2026-10-09 — FX-02/FX-03 offline prepared embedding
 
 Additive v2 exposes writable native f64 Digital Delay, existing Room and

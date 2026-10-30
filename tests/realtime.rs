@@ -274,7 +274,7 @@ fn prepared_v2_commit_render_queries_reset_panic_faults_are_allocation_free() {
 #[test]
 fn writable_embedding_publication_transition_reset_and_retirement_are_allocation_free() {
     use shr_fx::c_api_v2::*;
-    for algorithm in [1, 2, 3] {
+    for algorithm in 1..=10 {
         let mut s = Settings::default();
         unsafe {
             assert_eq!(

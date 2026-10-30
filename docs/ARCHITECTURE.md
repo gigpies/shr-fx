@@ -392,7 +392,7 @@ The general aliasing/oversampling rationale is discussed in [Parker et al.,
 DAFx 2016](https://dafx.de/paper-archive/2016/dafxpapers/20-DAFx-16_paper_41-PN.pdf);
 this implementation uses FIR oversampling, not that paper's ADAA algorithm.
 
-## Writable embedding v2 contract (2026-10-09)
+## Writable embedding v2 contract (expanded 2026-10-29)
 
 V2 is additive; v1 symbols, layouts and fixed samples remain unchanged. One
 single owner serializes every operation on an instance, including queries.
@@ -403,17 +403,59 @@ exact audio in-place is allowed, partial overlap is refused. Objects and their
 owned buffers must never overlap caller storage. Keep the library loaded until
 all objects are destroyed. Invalid pointers cannot be made memory-safe by C.
 
-Stable IDs: 1 digital delay, 2 Room reverb, 3 single-voice chorus. Settings use
-exact version=2 and sizeof, fixed-width fields, native double parameters.
-Time is milliseconds (delay 1..2000, Room predelay 0..200, chorus base 1..30).
-Amount is delay feedback 0..0.9, Room decay 0..0.9, chorus depth 0..9 ms;
-chorus base-depth must be >=1 and base+depth <=39. Damping is 0..1 for
-delay/Room and must be zero for chorus. Rate Hz is 0.05..10 for chorus and
-zero otherwise. Gain is 0..1; bypass is 0/1; reserved is zero. Defaults:
-delay 20/.25/.35, Room 0/.5/.35, chorus 12/3/0 at .5 Hz, gain .5.
-All numeric values must be finite. Unsupported fields/IDs are refused intact.
-GigPies resolves tempo divisions into milliseconds; FX advances on source frames.
-Intentional time excludes all buffering/device/transport delay (no adapter delay).
+Stable IDs are additive; IDs 1–3 retain their original parameters and samples.
+Settings use exact version=2 and sizeof, fixed-width fields and native doubles.
+All numeric values must be finite; unsupported fields/IDs are refused intact.
+The descriptor query is authoritative for available controls and units.
+
+| ID | Algorithm | Time ms | Amount | Damping | Rate Hz |
+|---|---|---|---|---|---|
+| 1 | Digital delay | 1..2000 | feedback 0..0.9 | 0..1 | 0, unavailable |
+| 2 | Room | predelay 0..200 | decay 0..0.9 | 0..1 | 0, unavailable |
+| 3 | Chorus | base 1..30 | depth 0..9 ms | 0, unavailable | 0.05..10 |
+| 4 | Small Room | predelay 0..200 | decay 0..0.9 | 0..1 | 0, unavailable |
+| 5 | Chamber | predelay 0..200 | decay 0..0.9 | 0..1 | 0, unavailable |
+| 6 | Plate | predelay 0..200 | decay 0..0.9 | 0..1 | 0, unavailable |
+| 7 | Hall | predelay 0..200 | decay 0..0.9 | 0..1 | 0, unavailable |
+| 8 | Tape echo | 1..2000 | feedback 0..0.9 | 0.35..1 | 0, unavailable |
+| 9 | Warm exciter | 0, unavailable | drive 0..1 | tone 0..1 | tune 600..6000 |
+| 10 | Bright exciter | 0, unavailable | drive 0..1 | tone 0..1 | tune 600..6000 |
+
+Gain is 0..1, bypass 0/1, reserved zero for every algorithm. Chorus additionally
+requires base-depth >=1 and base+depth <=39 ms. Defaults (time/amount/damping/rate):
+digital 20/.25/.35/0, all reverbs 0/.5/.35/0, chorus 12/3/0/.5,
+tape 375/.45/.5/0, both exciters 0/.3/.6/2500; gain .5 throughout.
+
+All reverbs reuse the standalone generic networks in f64. Room/Small Room
+preserve channel isolation; Chamber/Plate/Hall intentionally feed .85 own + .15
+opposite input into each side's diffusion. Higher damping darkens the feedback
+tail; .15 and .85 are useful bright/dark starting values, not separate algorithms
+or listening-qualified presets. Decay is normalized, not seconds/RT60.
+Hall is available for offline integration; aggregate target admission and
+listening remain unqualified, as for the other effects.
+
+Tape reuses the rack's bounded rational saturation `x/(1+.12*abs(x))`, feedback
+filter and seeded parabolic wow/flutter (.37 Hz/.35 ms plus 6.1 Hz/.08 ms).
+No hardware-emulation claim or independent wow/flutter control. Its minimum
+damping .35 is explicit rather than accepting a value the DSP would override.
+Exciter uses the shared native-f32/f64 4x oversampled nonlinear residual, with
+no linear dry branch. Warm emphasizes even harmonics; Bright emphasizes odd.
+Drive zero is exact silence. `damping` is the exciter's **tone**, higher brighter;
+`rate_hz` is its **tune**, not modulation speed. Effective tune is
+`min(tune, sample_rate*.2)` and output cutoff is
+`min(2000+16000*tone, sample_rate*.4)`; a 20 Hz DC filter precedes the output filters.
+Parameters are prepared directly as f64, never through the standalone f32 schema.
+
+`shr_fx_v2_delay_time(bpm, denominator, modifier, out_ms)` is an optional additive
+control-side helper, independently resolved on older libraries. It accepts BPM
+30..300 and denominators 1,2,4,8,16,32,64 (a 1/N note); modifier 0 straight,
+1 dotted, 2 triplet. The result is `240000/BPM/N * {1,1.5,2/3}` ms for digital
+or tape delay. Invalid musical input returns -6, invalid output shape -1, and a
+time outside 1..2000 ms returns -2, preserving output on every error. No silent
+clamping: e.g. a whole note at 120 BPM is 2000 ms, at 30 BPM it is unsupported.
+GigPies owns BPM/tap/clock and sends resolved milliseconds via prepared settings;
+no clocks or tempo fields were added to processing. The standalone saved division
+indices and UI are unchanged. Intentional time excludes transport/device delay.
 
 Rates 8000..192000; blocks 1..8192 frames, stereo interleaved doubles, input
 absolute bound 16. Output fault bound 256. Values above unity are supported.
@@ -446,7 +488,10 @@ up to three prepared effects per instance, each below 8 MiB; host limits aggrega
 instance count and cost. No hardware-ready instance count is claimed. History is
 one last accepted request, one last request/result/state plus current/applied
 revisions. Refusal remains correlated even if an earlier accepted edit finishes. IDs strictly increase;
-retries are refused as duplicates, stale base revisions are refused. Query reports
+IDs at or below the last accepted ID are refused as duplicates, including after
+interruption/reset. A refused ID above that watermark may be retried with a fresh
+base once backpressure clears; there is no cache of every rejected request.
+Stale base revisions are refused. Query reports
 current/target settings, pending/transition, latched DSP fault and last result,
 never hardware health. Host must mute any failed block, including panic failure;
 pointer/capacity/panic errors cannot promise writable output. No settings file format or device assignments enter v2.
@@ -455,8 +500,11 @@ and perform bounded work. Reclamation requires an off-thread retire/destroy pass
 Target-specific aggregate CPU/deadline/thermal/listening acceptance remains gated.
 
 Maximum work per source frame is one effect tick: delay two ring reads/writes
-plus bounded diffuser storage, Room two predelay taps/eight combs/four output
-allpasses, chorus one voice/two fractional taps. Reset invalidates ring history
+plus bounded diffuser storage; tape adds two oscillators and two saturations;
+reverbs use two predelay taps/eight combs, up to four input and eight output
+allpasses; chorus one voice/two fractional taps. Exciter uses fixed 17-tap
+polyphase FIRs at 2x/4x, four residual evaluations per channel and fixed filters;
+coefficient refresh is bounded to once per 32 source samples. Reset invalidates ring history
 without clearing sample allocations. Transition runs one effect, never two;
 retire removes at most one object per call. Capabilities parameter descriptors
 advertise exact supported scalar units/defaults/ranges; validate additionally
@@ -464,16 +512,65 @@ checks joint chorus bounds. Hardware instance admission is unavailable, not zero
 usable instances; the host owns aggregate admission until measured acceptance.
 
 `intentional_delay_frames` reports rounded configured delay time, Room predelay,
-or chorus base delay, respectively. Room onset also includes its comb network;
-chorus instantaneous taps vary with deterministic modulation. No field claims
+or chorus base delay, respectively; exciters report zero configured delay.
+Reverb onset also includes its comb network; chorus/tape instantaneous taps vary
+with deterministic modulation. Exciter FIR and IIR phase/group delay is separate
+from configured delay: zero does not mean a phase-neutral parallel return. No field claims
 measured latency or silence. `last_result` is the latest process/publish result;
 `last_request`/`request_result`/`request_state` retain the latest publication
 outcome independently, while accepted/applied IDs track DSP progress.
 
+### GP-FX consumer requirements
+
+This palette is distinct from GP21's existing per-channel source-timeline delay.
+Resolve the complete `shr_fx_v2_*` set and exact version/size layouts separately:
+settings 64, capabilities 48, parameter 48, status 200 bytes on this target.
+The algorithm mask uses `1 << algorithm_id` (2046 for IDs 1–10), not zero-based
+positions. Consumers must test individual bits and ignore unknown IDs; old
+libraries advertise their smaller subset (14 for IDs 1–3). The musical-time
+helper is optional, not part of the original required lifecycle symbol set.
+Preserve the `shr_fx_v1_*` fallback and `shr_fx_delay_v2_*` path; their tokens,
+parameter bounds, transition rules and status layouts are not interchangeable.
+
+Delay/reverb damping is a dimensionless per-sample feedback-filter coefficient,
+not Hz; exciter uses the same field for normalized tone as specified above.
+Room amount is a normalized decay control (internal comb feedback .45 + .5 ×
+amount), not seconds/RT60; delay amount is feedback and chorus amount is ms.
+Seed is any u32, default 558345748, initializing deterministic modulation;
+it is not a continuous parameter descriptor. Bounds do not vary with supported
+sample rate (exciter effective filter cutoffs are capped as above); times are
+converted to frames by the effect. There is no internal tempo owner,
+device assignment or standalone rack schema in this ABI.
+
+Bypass-only publication switches excitation immediately at the next nonempty
+block (no excitation ramp); applied does not mean the tail is silent. All other
+edits, including gain and seed, replace DSP and discard the old tail after
+fade-out. Each fade takes `floor(rate/100)` frames (480 at 48 kHz); the capability
+value 100 is the divisor, not a fixed frame count. At most one DSP runs per frame.
+Zero-frame processing leaves status, fault and transitions unchanged, including
+`last_result`. Capacity/pointer failures preserve DSP and write no audio.
+
+Retire is a serialized ownership transfer, not permission to query a running
+instance concurrently from a reclamation thread. Transfer the returned token
+through a bounded host queue and call cancel off processing, or quiesce the
+instance for off-thread retirement. Do not publish until both transition and
+retired-slot backpressure clear. A successful publish consumes its token even
+when a later reset interrupts it. Reset retains current/revision and historical
+accepted/applied IDs; an interrupted accepted ID need never become applied.
+Before swap it cancels the pending state, after swap it retains the new state.
+
+Palette panic is `reset`, clearing the whole instance; it has no independent
+channel mask or permanent mute. Host-owned mute/rearm and source discontinuity
+handling remain required. After an ABI panic (-7), mute the failed block and
+quiesce/destroy/recreate the instance rather than assuming its partial state is
+recoverable. Shutdown must also cancel caller-owned unsubmitted/refused and
+retrieved tokens before library unload. No global instance limit is advertised:
+host admission must bound instances, queued preparations and reclamation memory.
+
 ## Embedding ABI namespaces
 
-The published `shr_fx_v2_*` symbols retain the prepared Delay/Room/Chorus
-contract. The independent source-timeline stereo delay uses
+The published `shr_fx_v2_*` symbols retain their prepared lifecycle and original
+Delay/Room/Chorus behavior, with additive palette IDs and optional time helper. The independent source-timeline stereo delay uses
 `shr_fx_delay_v2_*` and Rust module `c_api_delay_v2`; its complete symbol set,
 struct sizes and lifetime contract must be resolved separately. Old local
 delay builds used the colliding v2 names and must be rebuilt together with

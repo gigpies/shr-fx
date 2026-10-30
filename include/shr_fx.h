@@ -143,14 +143,36 @@ void shr_fx_delay_v2_destroy(void *handle);
 /* V2 single-owner prepared wet effect. See Architecture's v2 contract.
  * Never mix v1/v2 handles. All caller storage disjoint from objects/buffers.
  * Success publish consumes prepared; errors retain caller ownership.
- * retire transfers a relinquished object; destroy/cancel only off-thread. */
+ * retire transfers a relinquished object; destroy/cancel only off-thread.
+ * All instance operations, including status/retire, are serialized. Prepare
+ * may run elsewhere on copied settings; publish runs at a block boundary.
+ * One pending and one retired object; reclaim before publishing another edit.
+ * request must exceed accepted_request (initially 0), base must equal revision.
+ * Rejected IDs can be retried; accepted IDs cannot, even after reset cancels them.
+ * Bypass-only edits stop excitation immediately at the next nonempty block,
+ * preserving tails. Other edits discard old tails via fade-out/swap/fade-in:
+ * floor(rate/100) frames per side, one DSP tick per frame, no overlap.
+ * reset is the whole-instance panic/history clear, NOT permanent mute; host
+ * owns persistent mute and source-gap/epoch detection. No channel panic here.
+ * Destroy only after quiescence; frees active/pending/retired. Caller separately
+ * cancels unsubmitted/refused/retrieved tokens before unloading the library. */
 enum { SHR_FX_V2_OK=0, SHR_FX_V2_ARGUMENT=-1, SHR_FX_V2_CAPACITY=-2,
  SHR_FX_V2_SAMPLE=-3, SHR_FX_V2_STALE=-4, SHR_FX_V2_DUPLICATE=-5,
  SHR_FX_V2_SETTINGS=-6, SHR_FX_V2_PANIC=-7 };
-enum { SHR_FX_V2_DELAY=1, SHR_FX_V2_ROOM=2, SHR_FX_V2_CHORUS=3 };
+enum { SHR_FX_V2_DELAY=1, SHR_FX_V2_ROOM=2, SHR_FX_V2_CHORUS=3,
+ SHR_FX_V2_SMALL_ROOM=4, SHR_FX_V2_CHAMBER=5, SHR_FX_V2_PLATE=6,
+ SHR_FX_V2_HALL=7, SHR_FX_V2_TAPE=8,
+ SHR_FX_V2_EXCITER_WARM=9, SHR_FX_V2_EXCITER_BRIGHT=10 };
 /* IDs time=1, amount=2, damping=3, rate=4, gain=5, bypass=6.
  * Units ratio=0, ms=1, Hz=2, boolean=3. unavailable != legitimate zero.
- * Chorus additionally requires time-amount >=1 and time+amount <=39 ms. */
+ * Chorus additionally requires time-amount >=1 and time+amount <=39 ms.
+ * Reverbs use time=predelay, amount=normalized decay, damping=darkness.
+ * Tape uses delay controls with damping >=.35; fixed seeded wow/flutter.
+ * Exciters use time=0 (unavailable), amount=drive, damping=tone (higher is
+ * brighter), rate=tune Hz (600..6000). Actual tune <= rate*.2; tone cutoff
+ * min(2000+16000*tone, rate*.4). No linear dry branch; drive0 is silent.
+ * Discover algorithm support with mask & (1u << algorithm); old libraries
+ * advertise only their subset. IDs 1..3 and existing struct layouts unchanged. */
 typedef struct shr_fx_parameter_v2 {
  uint32_t version, size, algorithm, parameter, available, unit;
  double minimum, maximum, default_value;
@@ -190,6 +212,15 @@ int32_t shr_fx_v2_status(void *instance, shr_fx_status_v2 *out, uint32_t version
 void *shr_fx_v2_retire(void *instance);
 void shr_fx_v2_cancel(void *prepared);
 void shr_fx_v2_destroy(void *instance);
+
+/* Optional additive control-side helper; resolve separately on older libraries.
+ * BPM 30..300, denominator 1/2/4/8/16/32/64 means a 1/N note.
+ * modifier: 0 straight, 1 dotted, 2 triplet. Writes milliseconds on success.
+ * -1 invalid output shape, -6 invalid musical input, -2 exceeds 1..2000ms.
+ * Failures preserve output; never clamps. Applies to digital and tape delay.
+ * Host owns tempo/tap/clock and supplies the result as settings.time_ms. */
+int32_t shr_fx_v2_delay_time(double bpm, uint32_t denominator,
+                           uint32_t modifier, double *out_ms);
 
 #ifdef __cplusplus
 }
