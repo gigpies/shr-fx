@@ -12,7 +12,7 @@ crate-type = ["rlib", "cdylib"]
 [dependencies]
 ratatui = "=0.20.1"
 crossterm = "=0.29.0"
-jack = "=0.13.5"
+jack = "=0.14.0"
 alsa = "=0.12.1"
 rtrb = "=0.4.1"
 serde = { version = "=1.0.229", features = ["derive"] }
