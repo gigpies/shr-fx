@@ -445,7 +445,7 @@ impl Audio {
                 } else {
                     PortFlags::IS_INPUT
                 };
-                if !port.flags().contains(flag)
+                if !port.flags().map_err(|e| e.to_string())?.contains(flag)
                     || port.port_type().map_err(|e| e.to_string())? != "32 bit float mono audio"
                 {
                     return Err("Wrong JACK port direction/type".into());
